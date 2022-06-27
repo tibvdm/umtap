@@ -63,17 +63,17 @@ pub fn splitkmers(args: SplitKmers) -> errors::Result<()> {
         .from_writer(io::stdout());
 
     for record in reader.deserialize() {
-        let (tid, sequence): (TaxonId, String) = record?;
+        let (uid, tid, sequence): (u32, TaxonId, String) = record?;
         if sequence.len() < args.length {
             continue;
         }
         for kmer in sequence.as_bytes().windows(args.length) {
             if let Some(&b) = byte {
                 if b == kmer[0] {
-                    writer.serialize((String::from_utf8_lossy(&kmer[1..]), tid))?;
+                    writer.serialize((String::from_utf8_lossy(&kmer[1..]), tid, uid))?;
                 }
             } else {
-                writer.serialize((String::from_utf8_lossy(kmer), tid))?;
+                writer.serialize((String::from_utf8_lossy(kmer), tid, uid))?;
             }
         }
     }

@@ -4,6 +4,7 @@ use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
+use itertools::Itertools;
 
 use crate::agg;
 use crate::errors;
@@ -162,8 +163,15 @@ pub fn taxa2agg(args: TaxaToAgg) -> errors::Result<()> {
         let taxons = record
             .sequence
             .iter()
-            .map(|s| parser(s))
+            .map(|s| parser(s.split('\t').collect::<Vec<&str>>()[0]))
             .collect::<errors::Result<Vec<(TaxonId, f32)>>>()?;
+
+        let functions = itertools::flatten(record
+            .sequence
+            .iter()
+            .map(|s| s.split('\t').collect::<Vec<&str>>()[1].split(';').collect::<Vec<&str>>()))
+            .unique()
+            .join(";");
 
         // Create a frequency table of taxons for this read (taking into account the lower bound)
         let counts = agg::count(taxons.into_iter().filter(|&(tid, _)| tid != 0));
@@ -172,10 +180,10 @@ pub fn taxa2agg(args: TaxaToAgg) -> errors::Result<()> {
         writer.write_record(fasta::Record {
             header: record.header,
             sequence: if counts.is_empty() {
-                vec!["1".into()]
+                vec![format!("1\t{}", functions)]
             } else {
                 let aggregate = aggregator.aggregate(&counts)?;
-                vec![snapping[aggregate].unwrap().to_string()]
+                vec![format!("{}\t{}", snapping[aggregate].unwrap().to_string(), functions)]
             },
         })?;
     }

@@ -68,12 +68,13 @@ pub fn joinkmers(args: JoinKmers) -> errors::Result<()> {
     let validsnapping = tree.snapping(&by_id, false);
     let aggregator = tree::mix::MixCalculator::new(tree.root, &by_id, 0.95);
 
-    let mut emit = |kmer: &str, tids: Vec<(TaxonId, f32)>| {
+    let mut emit = |kmer: &str, tids: Vec<(TaxonId, f32)>, uids: Vec<u32>| {
+        let uids_string = uids.iter().map(|c| c.to_string()).collect::<Vec<String>>().join(";");
         let counts = agg::count(tids.into_iter());
         if let Ok(aggregate) = aggregator.aggregate(&counts) {
             let taxon = ranksnapping[aggregate].unwrap();
             let rank = by_id.get_or_unknown(taxon).unwrap().rank;
-            writeln!(handle, "{}\t{}\t{}", kmer, taxon, rank)
+            writeln!(handle, "{}\t{}\t{}\t{}", kmer, taxon, rank, uids_string)
         } else {
             Ok(())
         }
@@ -82,23 +83,28 @@ pub fn joinkmers(args: JoinKmers) -> errors::Result<()> {
     // Iterate over records and emit groups
     let mut current_kmer: Option<String> = Option::None;
     let mut current_tids = vec![];
+    let mut current_uids = vec![];
     for record in reader.deserialize() {
-        let (kmer, tid): (String, TaxonId) = record?;
+        let (kmer, tid, uid): (String, TaxonId, u32) = record?;
         if let Some(c) = current_kmer {
             if c != kmer {
-                emit(&c, current_tids)?;
+                emit(&c, current_tids, current_uids)?;
                 current_tids = vec![];
+                current_uids = vec![];
             }
         } else {
             current_tids = vec![];
+            current_uids = vec![];
         }
+
         current_kmer = Some(kmer);
         if let Some(validancestor) = validsnapping[tid] {
             current_tids.push((validancestor, 1.0));
         }
+        current_uids.push(uid);
     }
     if let Some(c) = current_kmer {
-        emit(&c, current_tids)?;
+        emit(&c, current_tids, current_uids)?;
     }
 
     Ok(())

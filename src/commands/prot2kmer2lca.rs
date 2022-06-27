@@ -11,6 +11,11 @@ use std::sync::Mutex;
 
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
+use hash_index::index::functional_table::FunctionalTable;
+use hash_index::index::lca_table::LcaTable;
+use hash_index::index::conflict_table::ConflictTable;
+use hash_index::kmer::Kmer;
+
 use crate::errors;
 use crate::io::fasta;
 
@@ -76,10 +81,6 @@ pub struct ProtToKmerToLca {
     #[structopt(short = "o", long = "one-on-one")]
     pub one_on_one: bool,
 
-    /// An index that maps k-mers to taxon IDs
-    #[structopt(parse(from_os_str))]
-    pub fst_file: PathBuf,
-
     /// Instead of reading from stdin and writing to stdout, create a Unix
     /// socket to communicate with using OpenBSD's netcat (`nc -NU <socket>`).
     /// This is especially useful in combination with the `--in-memory` flag:
@@ -102,16 +103,28 @@ pub struct ProtToKmerToLca {
     /// together.
     #[structopt(short = "c", long = "chunksize", default_value = "240")]
     pub chunk_size: usize,
+
+    /// An index that maps k-mers to taxon IDs
+    #[structopt(parse(from_os_str))]
+    pub conflict_file: PathBuf,
+
+    /// An index that maps k-mers to taxon IDs
+    #[structopt(parse(from_os_str))]
+    pub lca_file: PathBuf,
+
+    /// An index that maps k-mers to taxon IDs
+    #[structopt(parse(from_os_str))]
+    pub function_file: PathBuf,
 }
 
 /// Implements the prot2kmer2lca command
 pub fn prot2kmer2lca(args: ProtToKmerToLca) -> errors::Result<()> {
-    let fst = if args.fst_in_memory {
-        let bytes = fs::read(&args.fst_file)?;
-        fst::Map::from_bytes(bytes)?
-    } else {
-        unsafe { fst::Map::from_path(&args.fst_file) }?
-    };
+    let mut conflict_table: ConflictTable = ConflictTable::from_bin(args.conflict_file.display().to_string());
+    let mut lca_table: LcaTable = LcaTable::from_bin(args.lca_file.display().to_string());
+    let mut function_table: FunctionalTable = FunctionalTable::from_bin(args.function_file.display().to_string());
+
+    eprintln!("ok");
+
     let default = if args.one_on_one { Some(0) } else { None };
     if let Some(socket_addr) = &args.socket {
         let listener = UnixListener::bind(socket_addr)?;
@@ -124,7 +137,9 @@ pub fn prot2kmer2lca(args: ProtToKmerToLca) -> errors::Result<()> {
                 stream_prot2kmer2lca(
                     &stream,
                     &stream,
-                    &fst,
+                    &conflict_table,
+                    &lca_table,
+                    &function_table,
                     args.length,
                     args.chunk_size,
                     default,
@@ -139,7 +154,9 @@ pub fn prot2kmer2lca(args: ProtToKmerToLca) -> errors::Result<()> {
         stream_prot2kmer2lca(
             io::stdin(),
             io::stdout(),
-            &fst,
+            &conflict_table,
+            &lca_table,
+            &function_table,
             args.length,
             args.chunk_size,
             default,
@@ -150,10 +167,14 @@ pub fn prot2kmer2lca(args: ProtToKmerToLca) -> errors::Result<()> {
 fn stream_prot2kmer2lca<R, W>(
     input: R,
     output: W,
-    fst: &fst::Map,
+
+    conflict_table: &ConflictTable,
+    lca_table: &LcaTable,
+    functional_table: &FunctionalTable,
+
     k: usize,
     chunk_size: usize,
-    default: Option<u64>,
+    default: Option<u32>,
 ) -> errors::Result<()>
 where
     R: Read + Send,
@@ -173,8 +194,17 @@ where
                     chunk_output.push_str(&format!(">{}\n", read.header));
                     let mut lcas = (0..(prot.len() - k + 1))
                         .map(|i| &prot[i..i + k])
-                        .filter_map(|kmer| fst.get(kmer).map(Some).unwrap_or(default))
-                        .map(|lca| lca.to_string())
+                        .filter_map(|kmer| conflict_table.get(&Kmer::from(kmer))
+                            .map(|fpointer| {
+                                let functions = functional_table.get(fpointer as usize)
+                                    .into_iter()
+                                    .map(|function| function.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(";");
+
+                                return format!("{}\t{}", lca_table.get(fpointer as usize).to_string(), functions);
+                            }))
+                        //.map(|lca| lca.to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
                     if !lcas.is_empty() {

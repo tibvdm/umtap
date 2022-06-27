@@ -66,7 +66,7 @@ pub fn bestof(args: BestOf) -> errors::Result<()> {
                     .max_by_key(|&rec| {
                         rec.sequence
                             .iter()
-                            .map(|tid| tid.parse::<TaxonId>().unwrap_or(0))
+                            .map(|tid| tid.split('\t').collect::<Vec<&str>>()[0].parse::<TaxonId>().unwrap_or(0))
                             .filter(|&s| s != 0 && s != 1)
                             .count()
                     })
