@@ -30,6 +30,8 @@ structopt = "0.3.23"
 strum = "0.17.1"
 strum_macros = "0.17.1"
 attohttpc = { version = "0.15.0", features = [ "json" ] }
+hash_index = { path = "../hash-index" }
+itertools = "0.7.4"
 
 [dev-dependencies]
 assert_matches = "1.3.0"
